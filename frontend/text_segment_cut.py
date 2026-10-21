@@ -1,5 +1,6 @@
 import re
 import string
+import unicodedata
 
 def is_chinese(text):
     """检测文本是否包含中文"""
@@ -66,12 +67,17 @@ def split_and_group_sentences(text, group_by_lang=False):
 def get_semantic_length(text):
     """
     计算字符串的语义长度。
-    一个汉字计为1，一个连续的英文字母串（单词）计为1。
+    一个汉字、日文假名或韩文音节计为1，一个拉丁字母词计为1。
+    拉丁词支持重音字母和词内撇号，例如 mañana 和 don't 均计为1。
     """
-    chinese_char_count = len(re.findall(r'[\u4e00-\u9fa5]', text))
-    # [a-zA-Z]+ 匹配一个或多个连续的英文字母
-    english_word_count = len(re.findall(r'[a-zA-Z]+', text))
-    return chinese_char_count + english_word_count
+    text = unicodedata.normalize('NFC', text)
+    cjk_char_count = len(re.findall(
+        r'[\u4e00-\u9fff\u3041-\u3096\u309d-\u309f'
+        r'\u30a1-\u30fa\u30fc-\u30ff\uac00-\ud7a3]', text))
+    latin_letters = r'A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u024f\u1e00-\u1eff'
+    latin_word_count = len(re.findall(
+        rf'[{latin_letters}]+(?:[\'’][{latin_letters}]+)*', text))
+    return cjk_char_count + latin_word_count
     
 def has_valid_content(text):
     """
@@ -119,8 +125,8 @@ def append_text_fragment(fragments, new_text, max_len, min_tail_length):
 
 def split_long_fragment(text_fragment, max_len):
     """
-    分割超长的文本片段。优先沿标点(clause边界)切,避免从字中间断开。
-    仅当单个 clause 自身仍超 max_len 时,才退化到字/词级切分(保底不卡死)。
+    沿标点边界分割超长片段。max_len 是聚合目标，无标点的完整子句
+    即使超过目标也整体保留，不按字或词强制截断。
     """
     fragment_semantic_len = get_semantic_length(text_fragment)
     if fragment_semantic_len <= max_len:
@@ -146,12 +152,12 @@ def split_long_fragment(text_fragment, max_len):
     for clause in merged_clauses:
         clause_semantic_len = get_semantic_length(clause)
 
-        # 单个 clause 自身超 max_len: 保底字/词级切分(避免无限卡死)
+        # 超长子句整体保留，避免将词语或没有标点的语义单元拆开。
         if clause_semantic_len > max_len:
             if current_fragment:
                 fragments.append(current_fragment)
                 current_fragment = ""
-            fragments.extend(_split_by_char_word(clause, max_len))
+            fragments.append(clause)
             continue
 
         current_semantic_len = get_semantic_length(current_fragment)
@@ -165,31 +171,6 @@ def split_long_fragment(text_fragment, max_len):
     if current_fragment:
         fragments.append(current_fragment)
 
-    return fragments
-
-
-def _split_by_char_word(text, max_len):
-    """
-    保底切分:按字(汉字)/词(英文)等基本语义单元切,用于单个 clause 仍超长时。
-    """
-    fragments = []
-    current = ""
-    tokens = re.findall(r'(\s+|[，、；。！？,;!?]|[\u4e00-\u9fa5]|[a-zA-Z]+|[^a-zA-Z\u4e00-\u9fa5]+)', text)
-    for tok in tokens:
-        tok_len = get_semantic_length(tok)
-        cur_len = get_semantic_length(current)
-        if cur_len + tok_len <= max_len:
-            current += tok
-        else:
-            if current:
-                fragments.append(current)
-            if tok_len > max_len:
-                fragments.append(tok)
-                current = ""
-            else:
-                current = tok
-    if current:
-        fragments.append(current)
     return fragments
 
 
@@ -229,12 +210,12 @@ def calibrate_positions(fragments, positions, original_text):
     return calibrated_positions
 
 
-def cut_text_by_semantic_length(text, max_semantic_length=50, min_tail_length=5):
+def cut_text_by_semantic_length(text, max_semantic_length=24, min_tail_length=5):
     """
     按照语义长度划分文本，保持语义单元的完整性，并返回位置信息
     Args:
         text: 输入文本
-        max_semantic_length: 最大语义长度限制
+        max_semantic_length: 目标语义长度，无标点的完整子句允许超过该值
         min_tail_length: 尾部最小长度
     Returns:
         dict: {

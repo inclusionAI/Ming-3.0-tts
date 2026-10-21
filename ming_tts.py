@@ -130,10 +130,6 @@ class MingTTS:
             fragments = cut_text_by_semantic_length(
                 preprosess_text(text).strip(), max_length)["fragments"]
             candidates = [(fragment, False) for fragment in fragments]
-        elif taskname == "STYLE":
-            # Voice design and free-form conditioning apply to the utterance
-            # as a whole, so the text is not split.
-            candidates = [(add_period(preprosess_text(text)), True)]
         else:
             fragments = cut_text_by_semantic_length(
                 add_period(preprosess_text(text)), max_length)["fragments"]
@@ -200,7 +196,9 @@ class MingTTS:
             waveforms.append(waveform)
 
         waveform = torch.cat(waveforms, dim=-1)
+        return self._pad_prompt_waveform(waveform), spk_emb
 
+    def _pad_prompt_waveform(self, waveform):
         # Pad at the front, not the back. The tail of the prompt seeds the
         # latent history for the first decode step, so trailing silence
         # would be what the model continues from.
@@ -214,7 +212,21 @@ class MingTTS:
             padded[:, -waveform.shape[-1]:] = waveform
             waveform = padded
 
-        return waveform, spk_emb
+        return waveform
+
+    def _prepare_generated_prompt(self, waveform):
+        """Encode the first generated fragment once for subsequent fragments."""
+        waveform = waveform.detach().cpu().float()
+        if waveform.ndim == 1:
+            waveform = waveform.unsqueeze(0)
+        speaker_waveform = waveform
+        if self.sample_rate != 16000:
+            speaker_waveform = torchaudio.transforms.Resample(
+                self.sample_rate, 16000)(speaker_waveform)
+        spk_emb = [self.spkemb_extractor(speaker_waveform)]
+        prompt_latent = self.model.encode_prompt_latent(
+            self._pad_prompt_waveform(waveform))
+        return prompt_latent, spk_emb
 
     def _speaker_embeddings(self, spk_emb_path):
         paths = (spk_emb_path if isinstance(spk_emb_path, list)
@@ -258,7 +270,7 @@ class MingTTS:
         cfg=2.0,
         sigma=0.25,
         temperature=0.0,
-        max_length=50,
+        max_length=24,
         max_decode_steps=1000,
         trim_silence=True,
         raw_text=False,
@@ -267,8 +279,10 @@ class MingTTS:
         """Synthesize ``text`` and return a ``(1, samples)`` waveform.
 
         By default the text is split into fragments of about ``max_length``
-        and normalized. ``raw_text=True`` sends it to the model exactly as
-        given, in one piece, which is how the published benchmarks were run.
+        and normalized. Split Voice Design and Freeform requests reuse the
+        first generated fragment as the reference for all later fragments.
+        ``raw_text=True`` sends the text as given, in one piece, which is how
+        the published benchmarks were run.
         """
         request = tts_tasks.build_task_generation_kwargs(
             task,
@@ -309,8 +323,11 @@ class MingTTS:
                 max_length,
             )
 
+        use_zero_spk_emb = request["use_zero_spk_emb"]
+        reference_first_fragment = (
+            request["taskname"] == "STYLE" and len(fragments) > 1)
         chunks = []
-        for fragment in fragments:
+        for index, fragment in enumerate(fragments):
             chunk = self.model.generate(
                 prompt=request["prompt"],
                 text=fragment,
@@ -322,7 +339,7 @@ class MingTTS:
                 cfg=request["cfg"],
                 sigma=request["sigma"],
                 temperature=request["temperature"],
-                use_zero_spk_emb=request["use_zero_spk_emb"],
+                use_zero_spk_emb=use_zero_spk_emb,
             )
             # Applied per fragment, not once at the end: the reference
             # implementation trims inside each synthesis job, so on split text
@@ -331,6 +348,10 @@ class MingTTS:
             if trim_silence:
                 chunk = trim_trailing_silence(chunk, self.sample_rate)
             chunks.append(chunk)
+            if reference_first_fragment and index == 0:
+                prompt_latent, spk_emb = self._prepare_generated_prompt(chunk)
+                prompt_text = fragment
+                use_zero_spk_emb = False
 
         waveform = torch.cat(chunks, dim=-1) if len(chunks) > 1 else chunks[0]
         if output_path is not None:
