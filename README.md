@@ -137,6 +137,13 @@ docker build -f docker/Dockerfile -t ming-tts .
 
 The 0.5b environment has been tested on NVIDIA H800-80GB and H20-96G. For 0.5b, `flash-attn` is optional; inference falls back to PyTorch SDPA.
 
+On RTX 50-series (Blackwell, sm_120) GPUs, the pinned torch 2.6.0 CUDA 12.4 wheels have no kernels for the GPU, and inference stops with `CUDA error: no kernel image is available for execution on the device`. Replace torch with a CUDA 12.8 build after installing the requirements:
+
+```bash
+pip install -r requirements.txt
+pip install torch==2.7.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu128
+```
+
 Tiny uses a separate reference inference environment: Python **3.10.15**, PyTorch and torchaudio **2.7.1+cu118** (CUDA 11.8 wheels), and `transformers==4.46.3`. Install the pinned dependencies from [requirements-tiny.txt](requirements-tiny.txt) in a dedicated environment, as other dependency versions differ from 0.5b. We recommend using NVIDIA H800 for inference.
 
 ```bash
