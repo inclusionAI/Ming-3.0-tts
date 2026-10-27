@@ -237,16 +237,21 @@ def cut_text_by_semantic_length(text, max_semantic_length=24, min_tail_length=5)
     # `\d\.\d` 匹配数字间的小数点
     # `([A-Z])\.([A-Z])` 匹配大写字母间的点
 
-    processed_text = re.sub(r'(\d)\.(\d)', r'\1' + DOT_PLACEHOLDER + r'\2', text)
+    # 用前后断言，连续的点（如 2.5.1）也能全部保护
+    processed_text = re.sub(r'(?<=\d)\.(?=\d)', DOT_PLACEHOLDER, text)
     for _ in range(3):
         processed_text = re.sub(r'([A-Z])\.([A-Z])', r'\1' + DOT_PLACEHOLDER + r'\2', processed_text)
+    # 保护千位分隔符（如 1,234,567），否则下面会被当作子句边界的“，”
+    # 占位符用一个私用区字符，不计入语义长度
+    COMMA_PLACEHOLDER = "\ue000"
+    processed_text = re.sub(r'(?<=\d),(?=\d{3}(?!\d))', COMMA_PLACEHOLDER, processed_text)
 
     processed_text = processed_text.replace("\n", " ").replace("。，", "。")
     
     if get_semantic_length(processed_text) <= max_semantic_length:
         # 返回前恢复占位符
         return {
-            "fragments": [processed_text.replace(DOT_PLACEHOLDER, ".")],
+            "fragments": [processed_text.replace(DOT_PLACEHOLDER, ".").replace(COMMA_PLACEHOLDER, ",")],
             "positions": {0: (0, len(text))}  # 整个文本的位置
         }
 
@@ -360,7 +365,7 @@ def cut_text_by_semantic_length(text, max_semantic_length=24, min_tail_length=5)
 
 
     # 最终返回结果前，恢复所有片段中的占位符
-    final_result = [frag.replace(DOT_PLACEHOLDER, ".") for frag in result_fragments]
+    final_result = [frag.replace(DOT_PLACEHOLDER, ".").replace(COMMA_PLACEHOLDER, ",") for frag in result_fragments]
 
     calibrated_positions = calibrate_positions(final_result, position_map, original_text)
     return {
