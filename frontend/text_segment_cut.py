@@ -135,7 +135,7 @@ def split_long_fragment(text_fragment, max_len):
     # —— 第一优先级:沿标点切 clause ——
     # 标点(中文，、；。！？ + 英文 ,;!?!) 及列表分隔(空格+[-•·]) 作为切分边界。
     # 用 split 保留分隔符并并回前一 clause, 使子串拼接 == 原文(位置校准仍能 find 到)。
-    clause_pattern = r'([，、；。！？,;!?]|\s+[-•·])'
+    clause_pattern = r'([，、；。！？,;.!?]|\s+[-•·])'
     parts = re.split(clause_pattern, text_fragment)
     merged_clauses = []
     for part in parts:
@@ -228,31 +228,32 @@ def cut_text_by_semantic_length(text, max_semantic_length=24, min_tail_length=5)
 
     # 保存原始文本用于位置计算
     original_text = text
-    # 定义一个独特的占位符
-    DOT_PLACEHOLDER = "##DOT##"
-    
-    # 保护小数点和特定缩写中的点
-    # 使用正则表达式查找数字中的点（如 3.14）和常见缩写中的点（如 U.S.A.）
-    # 并将它们替换为占位符
-    # `\d\.\d` 匹配数字间的小数点
-    # `([A-Z])\.([A-Z])` 匹配大写字母间的点
+    # Shield only punctuation inside structured tokens. Each replacement has
+    # the same length and no semantic weight, and cannot collide with input.
+    punct = '.,;!?，。！？'
+    available = (chr(i) for i in range(0xE000, 0xF900) if chr(i) not in text)
+    shields = {ch: next(available) for ch in punct}
+    restore = str.maketrans({v: k for k, v in shields.items()})
+    structures = re.compile(
+        r'(?i:https?://|www\.)[^\s，。！？]+|'
+        r'[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|'
+        r'\d+(?:[.,]\d+)+|(?:[A-Za-z]\.){2,}|'
+        r'(?i:(?<![A-Za-z])(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc)\.)')
+    def shield(match):
+        token = match[0]
+        # A URL's trailing sentence punctuation is not part of the URL.
+        tail = ''
+        if token.lower().startswith(('http://', 'https://', 'www.')):
+            while token and token[-1] in '.,;!?':
+                tail = token[-1] + tail
+                token = token[:-1]
+        return token.translate(str.maketrans(shields)) + tail
+    processed_text = structures.sub(shield, text)
 
-    processed_text = re.sub(r'(\d)\.(\d)', r'\1' + DOT_PLACEHOLDER + r'\2', text)
-    for _ in range(3):
-        processed_text = re.sub(r'([A-Z])\.([A-Z])', r'\1' + DOT_PLACEHOLDER + r'\2', processed_text)
-
-    processed_text = processed_text.replace("\n", " ").replace("。，", "。")
-    
     if get_semantic_length(processed_text) <= max_semantic_length:
-        # 返回前恢复占位符
-        return {
-            "fragments": [processed_text.replace(DOT_PLACEHOLDER, ".")],
-            "positions": {0: (0, len(text))}  # 整个文本的位置
-        }
+        return {"fragments": [text], "positions": {0: (0, len(text))}}
+    normalized_text = processed_text
 
-    # 标点标准化（只在处理时使用，不影响原始位置计算）
-    normalized_text = processed_text.replace(".", "。").replace("!", "！").replace("?", "？").replace(",", "，")
-    
     result_fragments = []
     position_map = {}
     global_offset = 0  # 跟踪在原始文本中的位置
@@ -265,7 +266,7 @@ def cut_text_by_semantic_length(text, max_semantic_length=24, min_tail_length=5)
     
     for i, char in enumerate(normalized_text):
         current_sentence += char
-        if char in "。！？": # 移除了 '.' 和 '!' '?'
+        if char in "。！？.!?":
             sentence = current_sentence.strip()
             if sentence:
                 sentences.append(sentence)
@@ -278,8 +279,6 @@ def cut_text_by_semantic_length(text, max_semantic_length=24, min_tail_length=5)
         # 如果最后一部分没有标点，可以补上，也可以不补，保持原逻辑
         sentences.append(current_sentence.strip())
         sentence_positions.append((start_idx, len(normalized_text)))
-        if not sentences[-1].endswith(("。", "！", "？")):
-             sentences[-1] += "。"
 
     # 第二阶段：处理每个句子
     fragment_counter = 0
@@ -291,7 +290,7 @@ def cut_text_by_semantic_length(text, max_semantic_length=24, min_tail_length=5)
         
         for i, char in enumerate(sentence):
             current_clause += char
-            if char in "，;；": # 移除了 ','
+            if char in "，,;；":
                 clause = current_clause.strip()
                 if clause and has_valid_content(clause):
                     clauses.append(clause)
@@ -360,7 +359,7 @@ def cut_text_by_semantic_length(text, max_semantic_length=24, min_tail_length=5)
 
 
     # 最终返回结果前，恢复所有片段中的占位符
-    final_result = [frag.replace(DOT_PLACEHOLDER, ".") for frag in result_fragments]
+    final_result = [frag.translate(restore) for frag in result_fragments]
 
     calibrated_positions = calibrate_positions(final_result, position_map, original_text)
     return {

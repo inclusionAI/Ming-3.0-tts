@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import os
+import tempfile
+from dataclasses import replace
 from typing import Any, Optional, Sequence
 
 from packaging.version import Version
+
+from frontend.audio_processing import trim_trailing_silence
+from frontend.text_processing import prepare_text, split_text
 
 from .task_protocol import (
     FORMAL_CFG,
@@ -54,8 +59,52 @@ class MingTinyTTS:
     structured-control JSON by hand.
     """
 
-    def __init__(self, engine: Any) -> None:
+    def __init__(self, engine: Any, *, text_normalization: bool = True) -> None:
         self.engine = engine
+        self.text_normalization = text_normalization
+        self._normalizer = None
+
+    @property
+    def normalizer(self):
+        """Share the Chinese/English TN without loading it for other languages."""
+        if self._normalizer is None:
+            try:
+                from frontend.talker_tn.talker_tn import TalkerTN
+            except ModuleNotFoundError as error:
+                if error.name not in {"pynini", "inflect"}:
+                    raise
+                raise ImportError(
+                    "Text normalization requires pynini and inflect. Install "
+                    "the text frontend dependencies or set text_normalization=False "
+                    "(--no_text_normalization on the command line)."
+                ) from error
+            self._normalizer = TalkerTN()
+        return self._normalizer
+
+    def _normalize_request(self, request):
+        def normalize(text):
+            # Keep loading lazy: dialect and non-zh/en requests never need TN.
+            text = prepare_text(
+                text, task=request.task, language=request.target_language,
+                normalizer=(lambda value, language: self.normalizer.normalize(
+                    value, language=language)) if self.text_normalization else None,
+            )
+            if not any(char.isalnum() for char in text):
+                raise ValueError("text produced no synthesizable content after normalization")
+            return text
+
+        if request.task == "podcast":
+            # The resolver has canonicalized the speaker labels and newlines.
+            # Normalize only each turn's speech; role IDs and reference
+            # transcripts are part of the model protocol.
+            turns = []
+            for line in request.text.splitlines():
+                speaker, speech = line.split(":", 1)
+                turns.append(f"{speaker}:{normalize(speech)}\n")
+            text = "".join(turns)
+        else:
+            text = normalize(request.text)
+        return replace(request, text=text)
 
     @property
     def sample_rate(self) -> int:
@@ -70,6 +119,7 @@ class MingTinyTTS:
         dtype: str = "bf16",
         moe_backend: str = "auto",
         runtime_state_dtype: str = "auto",
+        text_normalization: bool = True,
     ) -> "MingTinyTTS":
         """Load a local checkpoint directory or a Hugging Face repo id."""
 
@@ -98,7 +148,7 @@ class MingTinyTTS:
             runtime_state_dtype=runtime_state_dtype,
         )
         validate_release_engine(engine)
-        return cls(engine)
+        return cls(engine, text_normalization=text_normalization)
 
     def generate(
         self,
@@ -128,7 +178,17 @@ class MingTinyTTS:
         min_generation_frames: Optional[int] = None,
         max_generation_frames: Optional[int] = None,
         log_every_n_steps: int = 0,
+        max_length: int = 24,
+        raw_text: bool = False,
+        trim_silence: bool = True,
     ):
+        """Generate speech using the same text frontend as the 0.5B API.
+
+        Normalized text is grouped at punctuation with a target of max_length.
+        Split Voice Design/Freeform uses the first fragment as the reference.
+        Podcast keeps its multi-speaker dialogue in one generation. raw_text
+        bypasses all text preparation and splitting.
+        """
         request = resolve_task_request(
             task,
             text=text,
@@ -146,6 +206,10 @@ class MingTinyTTS:
         )
         seed = resolve_generation_seed(request.task, seed)
         self._validate_reference_paths(request.prompt_wav)
+        if not raw_text:
+            request = self._normalize_request(request)
+        fragments = ([request.text] if raw_text or request.task == "podcast"
+                     else split_text(request.text, max_length))
 
         decode_alignment_override = None
         if request.task == "podcast":
@@ -181,28 +245,66 @@ class MingTinyTTS:
         elif min_generation_frames is not None or max_generation_frames is not None:
             raise ValueError("generation-frame bounds are Podcast-only")
 
-        output = self.engine.synthesize(
-            request.text,
-            instruction=request.instruction,
-            prompt_wav=request.prompt_wav,
-            prompt_text=request.prompt_text,
-            target_language=request.target_language,
-            include_target_language=request.include_target_language,
-            conditioning=request.conditioning,
-            assistant_instruction=request.assistant_instruction,
-            allow_mixed_rml=request.allow_mixed_rml,
-            decode_alignment_override=decode_alignment_override,
-            seed=seed,
-            cfg_scale=cfg_scale,
-            flow_steps=flow_steps,
-            sigma=sigma,
-            temperature=temperature,
-            min_decode_steps=min_decode_steps,
-            max_decode_steps=max_decode_steps,
-            stop_threshold=stop_threshold,
-            log_every_n_steps=log_every_n_steps,
-        )
-        self._validate_output_contract(request, output)
+        outputs = []
+        fragment_request = request
+        reference_first = request.task in {"voice_design", "freeform"} and len(fragments) > 1
+        # A float WAV preserves generated audio without PCM16 quantization.
+        # The existing engine then applies the same resampling/alignment as
+        # it does for a user-provided reference.
+        with tempfile.TemporaryDirectory(prefix="ming-tiny-") as temporary_dir:
+            for index, fragment in enumerate(fragments):
+                fragment_request = replace(fragment_request, text=fragment)
+                output = self.engine.synthesize(
+                    fragment_request.text,
+                    instruction=fragment_request.instruction,
+                    prompt_wav=fragment_request.prompt_wav,
+                    prompt_text=fragment_request.prompt_text,
+                    target_language=fragment_request.target_language,
+                    include_target_language=fragment_request.include_target_language,
+                    conditioning=fragment_request.conditioning,
+                    assistant_instruction=fragment_request.assistant_instruction,
+                    allow_mixed_rml=fragment_request.allow_mixed_rml,
+                    decode_alignment_override=decode_alignment_override,
+                    seed=seed,
+                    cfg_scale=cfg_scale,
+                    flow_steps=flow_steps,
+                    sigma=sigma,
+                    temperature=temperature,
+                    min_decode_steps=min_decode_steps,
+                    max_decode_steps=max_decode_steps,
+                    stop_threshold=stop_threshold,
+                    log_every_n_steps=log_every_n_steps,
+                )
+                self._validate_output_contract(fragment_request, output)
+                if trim_silence:
+                    output.waveform = trim_trailing_silence(output.waveform, self.sample_rate)
+                outputs.append(output)
+                if reference_first and index == 0:
+                    import torchaudio
+
+                    reference_path = os.path.join(temporary_dir, "first_fragment.wav")
+                    waveform = output.waveform.detach().float().cpu().reshape(1, -1)
+                    torchaudio.save(reference_path, waveform, self.sample_rate,
+                                    encoding="PCM_F", bits_per_sample=32)
+                    fragment_request = replace(
+                        request, prompt_wav=reference_path, prompt_text=fragment,
+                        conditioning="prompt_latent",
+                    )
+
+        output = outputs[0]
+        if len(outputs) > 1:
+            import torch
+
+            output = replace(
+                output,
+                waveform=torch.cat([part.waveform for part in outputs], dim=-1),
+                latents=torch.cat([part.latents for part in outputs], dim=1),
+                stop_probabilities=[value for part in outputs for value in part.stop_probabilities],
+                stopped=all(part.stopped for part in outputs),
+                prompt_token_count=sum(part.prompt_token_count for part in outputs),
+                prompt_latent_steps=sum(part.prompt_latent_steps for part in outputs),
+                segments=outputs,
+            )
         if output_path is not None:
             from .inference import save_waveform
 

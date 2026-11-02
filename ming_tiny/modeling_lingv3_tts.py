@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import gc
 from typing import Dict, List, Optional
 
@@ -96,6 +96,9 @@ class LingV3TTSGenerationOutput:
     # that the speaker conditioning a task requires was actually applied.
     speaker_slot_count: int = 0
     campplus_speaker_rows: int = 0
+    # For API-level long-text generation, retain each segment's conditioning
+    # proof and decode diagnostics. Aggregate speaker counts describe segment 1.
+    segments: List["LingV3TTSGenerationOutput"] = field(default_factory=list)
 
 
 class LingV3TTSForConditionalGeneration(PreTrainedModel):

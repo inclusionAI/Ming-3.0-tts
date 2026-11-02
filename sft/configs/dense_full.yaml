@@ -1,0 +1,21 @@
+model_path: inclusionAI/Ming-3.0-tts-0.5b
+train_data: output/sft/train.jsonl
+output_dir: output/sft/full
+mode: full
+train_heads: [linear_proj_audio, flowloss, stop_head, spk_head]
+gradient_checkpointing: true
+speaker_dropout: 0.5
+min_duration: 1.0
+max_duration: 30.0
+max_sequence_length: 1024
+max_tokens_per_batch: 2048
+epochs: 3
+learning_rate: 0.00001
+min_learning_rate: 0.000001
+warmup_steps: 100
+weight_decay: 0.01
+gradient_clip: 1.0
+save_every_steps: 100
+keep_last_checkpoints: 2
+log_every_steps: 10
+seed: 42

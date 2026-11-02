@@ -58,6 +58,8 @@ Text and task-specific control tokens condition a language model with a DiT patc
 - [x] Ming-3.0-tts-tiny weights and inference code
 - [x] Ming-3.0-tts-tiny benchmarks
 - [x] vLLM-Omni accelerated inference
+- [x] Ming-3.0-tts-0.5b fine-tuning
+- [ ] Ming-3.0-tts-tiny fine-tuning
 - [ ] Technical report
 
 ## Contents
@@ -66,6 +68,7 @@ Text and task-specific control tokens condition a language model with a DiT patc
 - [Models](#models)
 - [Quick Start](#quick-start-)
 - [Cookbook](#cookbook)
+- [Fine-tuning (0.5B)](sft/README.md)
 - [Built-in voices](#built-in-voices)
 - [Performance](#performance)
 - [Limitations](#limitations)

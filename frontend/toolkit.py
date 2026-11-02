@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from typing import Iterable
 
 TOKENIZE_PATTERN = r"(?:[a-zA-Z]\.)+|[a-zA-Z]+(?:['\-][a-zA-Z]+)*|\d+(?:\.\d+)?|[\u4e00-\u9fff]|\s+|\S"
@@ -30,10 +31,8 @@ PARALINGUISTIC_TAG_RE = re.compile(
 def protect_paralinguistic_tags(text, normalize):
     """Apply ``normalize`` to the text around paralinguistic tags only.
 
-    The normalization pipeline replaces every character outside its
-    whitelist, which turns ``[Laughter]`` into ``，Laughter，``. Splitting on
-    the tags and normalizing the surrounding segments keeps the tags intact
-    without placeholder round-trips that TN could itself rewrite.
+    Tags are literal model tokens. Normalize only the surrounding text,
+    without passing placeholders through the numeric grammars.
     """
     if not text:
         return text
@@ -235,41 +234,15 @@ def add_period(text):
 
 
 def fallback_replace_non_alnum(text, replacement='，'):
-    """
-    兜底方案：将非汉字、英文、数字及基础TTS标点的字符替换为指定符号。
-    并合并连续的替换符号。
-    保留中文基础标点：，。！？；：、
-    保留英文基础标点：,.!?;:
-    保留小数点：.和空格等
-    """
-    # 白名单新增: () （） " “ ” (半角/全角括号 + 半角/中文双引号) 不再被替换成逗号
-    text = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9，。！？；：、,.!?;:\. \u2019\u2018'\"()（）\u201C\u201D]", replacement, text)
-    text = re.sub(re.escape(replacement) + '+', replacement, text).strip()
-    return text
+    """Retain printable Unicode; the legacy argument remains for callers."""
+    text = unicodedata.normalize('NFC', text)
+    return ''.join(' ' if ch.isspace() else ch for ch in text
+                   if ch.isprintable() or ch.isspace() or ch in '\u200c\u200d')
 
 
 def normalize_text_kit(text):
-    """
-    完整文本规范化流水线：
-    连续大写字母拆开（NBA → N B A）
-    (已禁用) 中英括号替换为逗号
-    兜底：非汉字/英文/数字/基础标点 → 逗号 (已把 () （） " “ ” 加入白名单)
-    英文标点→中文标点 + 标点去重 + 空格清理
-    """
-    #print(f'[normalize_text_kit] 输入                   : {text!r}')
-    # ---- 已禁用: 连续大写字母拆分（NBA → N B A）----
-    # text = split_uppercase_acronyms(text)
-    #print(f'[normalize_text_kit] step1 大写拆分后       : {text!r}')
-    # ---- 已禁用: 不再把括号替换成逗号 ----
-    # text = replace_parens_with_sep(text)
-    # print(f'[normalize_text_kit] step2 括号替换后       : {text!r}')
-    text = fallback_replace_non_alnum(text)
-    #print(f'[normalize_text_kit] step3 兜底非白名单→，  : {text!r}')
-    text = chinese_punc_en2cn(text)
-    #print(f'[normalize_text_kit] step4 英文标点→中文    : {text!r}')
-    text = re.sub(r'\s+', ' ', text).strip()
-    #print(f'[normalize_text_kit] step5 空格清理后       : {text!r}')
-    return text
+    """Clean controls and whitespace without changing names or punctuation."""
+    return re.sub(r'\s+', ' ', fallback_replace_non_alnum(text)).strip()
 
 
 def strip_markdown_code(text):
@@ -288,9 +261,29 @@ def strip_markdown_code(text):
 
 
 def preprosess_text(text):
-    """
-    文本预处理：
-    清除 Markdown 行内代码标记
-    """
+    """Remove Markdown wrappers while retaining their readable contents."""
+    text = re.sub(r'```[^\n`]*\n(.*?)```', r'\1', text, flags=re.S)
     text = strip_markdown_code(text)
+    # Balance nested URL parentheses, and never interpret a literal model
+    # tag followed by a parenthesized phrase as a Markdown link.
+    pieces, offset = [], 0
+    for match in re.finditer(r'!?\[([^]\n]*)\]\(', text):
+        if match.start() < offset:
+            continue
+        depth, end = 1, match.end()
+        while end < len(text) and depth and text[end] != '\n':
+            if text[end] == '\\':
+                end += 2
+                continue
+            depth += (text[end] == '(') - (text[end] == ')')
+            end += 1
+        if depth:
+            continue
+        pieces.append(text[offset:match.start()])
+        pieces.append(text[match.start():end] if f'[{match[1]}]' in PARALINGUISTIC_TAGS
+                      else match[1])
+        offset = end
+    text = ''.join(pieces) + text[offset:]
+    text = re.sub(r'(?m)^\s{0,3}#{1,6}[ \t]+', '', text)
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text, flags=re.S)
     return text

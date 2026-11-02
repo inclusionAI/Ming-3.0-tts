@@ -61,6 +61,14 @@ def parse_args():
     parser.add_argument("--stop_threshold", type=float)
     parser.add_argument("--log_every", type=int, default=0,
                         help="print decode diagnostics every N steps; 0 disables")
+    parser.add_argument("--no_text_normalization", action="store_true",
+                        help="skip Chinese/English text normalization")
+    parser.add_argument("--max_length", type=int, default=24,
+                        help="target semantic length for punctuation-based text splitting")
+    parser.add_argument("--raw_text", action="store_true",
+                        help="bypass text preparation and splitting")
+    parser.add_argument("--no_trim_silence", action="store_true",
+                        help="keep each fragment's trailing silence")
     return parser.parse_args()
 
 
@@ -101,7 +109,10 @@ def main():
 
     from ming_tiny import MingTinyTTS
 
-    tts = MingTinyTTS.from_pretrained(args.model_path, device=args.device)
+    tts = MingTinyTTS.from_pretrained(
+        args.model_path, device=args.device,
+        text_normalization=not args.no_text_normalization,
+    )
     output = tts.generate(
         **request,
         output_path=args.output_path,
@@ -114,6 +125,9 @@ def main():
         max_decode_steps=args.max_decode_steps,
         stop_threshold=args.stop_threshold,
         log_every_n_steps=args.log_every,
+        max_length=args.max_length,
+        raw_text=args.raw_text,
+        trim_silence=not args.no_trim_silence,
     )
     print(json.dumps({
         "task": task_protocol.normalize_task(args.task),

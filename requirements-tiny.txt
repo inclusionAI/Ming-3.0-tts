@@ -22,3 +22,10 @@ einx==0.4.3
 loguru==0.7.3
 x-transformers==2.7.4
 fla-core==0.4.2
+
+# Text frontend (shared with 0.5b)
+inflect==7.5.0
+
+# Optional FST normalization, loaded on first Chinese/English request.
+#   conda install -c conda-forge pynini==2.1.6
+# Pass --no_text_normalization to run without it.

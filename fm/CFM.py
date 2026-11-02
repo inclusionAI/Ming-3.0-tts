@@ -38,6 +38,7 @@ class CFM(nn.Module):
         latent_history,
         mask,
         patch_size,
+        reduction="mean",
     ):
         x1 = target
         batch, dtype = x1.shape[0], x1.dtype
@@ -51,10 +52,14 @@ class CFM(nn.Module):
         pred = self.model(x=x, t=time, c=cond, latent_history=latent_history, mask=mask.to(torch.bool))
         pred = pred[:, -patch_size:, :]
 
-        loss = F.mse_loss(pred, flow, reduction="none")
+        loss = F.mse_loss(pred.float(), flow.float(), reduction="none")
         mask = (mask == 1)
         loss = loss[mask]
 
+        if reduction == "sum_and_count":
+            return loss.sum(), loss.numel()
+        if reduction != "mean":
+            raise ValueError(f"Unsupported loss reduction: {reduction}")
         return loss.mean()
 
     @torch.no_grad()

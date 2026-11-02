@@ -14,57 +14,13 @@ import torch
 import torchaudio
 
 import tts_tasks
-from frontend.number_en import normalize_numbers
-from frontend.text_segment_cut import cut_text_by_semantic_length, is_chinese
-from frontend.toolkit import (add_period, normalize_text_kit, preprosess_text,
-                              protect_paralinguistic_tags)
+from frontend.audio_processing import trim_trailing_silence
+from frontend.text_processing import prepare_text, split_text
+from frontend.toolkit import normalize_text_kit
 from modeling_bailingmm import BailingMMNativeForConditionalGeneration
 from spkemb_extractor import SpkembExtractor
 
 SPEAKER_EMBEDDING_DIM = 192
-
-# Trailing-silence trim, matching the reference implementation's defaults.
-SILENCE_FRAME_SECONDS = 0.1
-SILENCE_THRESHOLD = 1e-3
-SILENCE_TAIL_SECONDS = 0.3
-
-
-def trim_trailing_silence(
-    speech,
-    sample_rate,
-    threshold=SILENCE_THRESHOLD,
-    tail_seconds=SILENCE_TAIL_SECONDS,
-):
-    """Cut the trailing silence, keeping a fixed tail.
-
-    The model keeps emitting near-silent frames after the utterance ends, and
-    how many it emits varies per fragment. This is the non-streaming
-    equivalent of the reference implementation's silence holder: scan 0.1 s
-    frames backwards for the last one above ``threshold`` and keep
-    ``tail_seconds`` beyond it.
-    """
-    if speech.numel() == 0:
-        return speech
-
-    frame = int(sample_rate * SILENCE_FRAME_SECONDS)
-    tail = int(sample_rate * tail_seconds)
-    if frame <= 0 or speech.shape[-1] < frame:
-        return speech[..., :tail]
-
-    # Drop the sub-frame remainder, as the reference does before unfolding.
-    num_frames = (speech.shape[-1] - frame) // frame + 1
-    speech = speech[..., :num_frames * frame]
-
-    scores = speech.unfold(-1, frame, frame).abs().mean(dim=-1)
-    scores = scores.mean(dim=list(range(scores.dim() - 1)))
-
-    index = int(scores.shape[0]) - 1
-    while index >= 0 and scores[index] <= threshold:
-        index -= 1
-    if index < 0:
-        # Silent throughout; emit the fixed tail rather than nothing.
-        return speech[..., :tail]
-    return speech[..., :index * frame + frame + tail]
 
 
 class MingTTS:
@@ -111,44 +67,16 @@ class MingTTS:
             self._normalizer = TalkerTN()
         return self._normalizer
 
-    def _normalize_fragment(self, text):
-        if not is_chinese(text):
-            text = normalize_numbers(text)
-        text = self.normalizer.normalize(text)
-        text = normalize_text_kit(text)
-        # TN can surface a leading comma when it rewrites a leading token.
-        if text[:1] == "，":
-            text = text[1:]
-        return text
+    def _normalize_fragment(self, text, language=None):
+        return normalize_text_kit(self.normalizer.normalize(text, language=language))
 
     def prepare_text(self, text, taskname, language_id, max_length):
-        """Split into synthesis fragments and normalize the ones that need it."""
-        if tts_tasks.preserve_multilingual_text(language_id):
-            # The FST normalizer reads any CJK ideograph as Chinese, which
-            # would strip the kana out of Japanese. Non-zh/en text is passed
-            # through unchanged.
-            fragments = cut_text_by_semantic_length(
-                preprosess_text(text).strip(), max_length)["fragments"]
-            candidates = [(fragment, False) for fragment in fragments]
-        else:
-            fragments = cut_text_by_semantic_length(
-                add_period(preprosess_text(text)), max_length)["fragments"]
-            candidates = [(fragment, True) for fragment in fragments]
-
-        prepared = []
-        for fragment, apply_tn in candidates:
-            if not fragment.strip():
-                continue
-            if apply_tn and self.text_normalization:
-                # Route around inline paralinguistic tags: normalization
-                # would rewrite "[Laughter]" into "，Laughter，".
-                fragment = protect_paralinguistic_tags(
-                    fragment, self._normalize_fragment)
-            if fragment.strip():
-                prepared.append(fragment)
-        if not prepared:
-            raise ValueError(f"text produced no synthesizable fragments: {text!r}")
-        return prepared
+        """Normalize whole entities before splitting at punctuation boundaries."""
+        text = prepare_text(
+            text, task=taskname, language=language_id,
+            normalizer=self._normalize_fragment if self.text_normalization else None,
+        )
+        return split_text(text, max_length)
 
     # -- audio prompt -----------------------------------------------------
     def _pad_align(self):
