@@ -401,8 +401,15 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
 
         past_key_values = None
         # Each inference step combines Autoregressive (AR) decoding with Flow Matching
-        decode_budget = (MAX_CACHE_LEN - inputs_embeds.shape[1]) // self.patch_size
-        for step in tqdm(range(min(max_decode_steps, decode_budget))):
+        prompt_len = inputs_embeds.shape[1]
+        decode_budget = (MAX_CACHE_LEN - prompt_len) // self.patch_size
+        if decode_budget < 1:
+            raise ValueError(
+                f"The prompt takes {prompt_len} of the {MAX_CACHE_LEN} cache positions, which leaves no room "
+                "to generate speech. Use a shorter reference audio and prompt text."
+            )
+        decode_steps = min(max_decode_steps, decode_budget)
+        for step in tqdm(range(decode_steps)):
             with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
                 outputs = self.model(
                     attention_mask=attention_mask,
@@ -464,6 +471,17 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
             attention_mask = torch.ones(inputs_embeds.shape[0], 1).to(inputs_embeds.device)
             latent_history[:, :-self.patch_size, :] = latent_history[:, self.patch_size:, :].clone()
             latent_history[:, -self.patch_size:, :] = sampled_token_latent[:]
+        else:
+            # The loop ran out of steps before the stop head fired.
+            if decode_steps == decode_budget:
+                limit = (f"the {MAX_CACHE_LEN}-position cache, of which the prompt takes {prompt_len}; "
+                         "a shorter reference audio or a smaller max_length leaves more room")
+            else:
+                limit = f"max_decode_steps={max_decode_steps}"
+            logger.warning(
+                f"Speech was cut off: decoding stopped after {decode_steps} steps without reaching the end. "
+                f"The limit is {limit}."
+            )
 
     @torch.inference_mode()
     def encode_prompt_latent(self, prompt_waveform):
