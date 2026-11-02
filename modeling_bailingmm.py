@@ -461,7 +461,10 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
                 position_ids = position_ids.add(delta)
                 position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
 
-            attention_mask = torch.ones(inputs_embeds.shape[0], 1).to(inputs_embeds.device)
+            # Grow the mask over cache + new tokens. transformers>=5 reads a 2D mask as
+            # covering the whole key sequence, so a (B, 1) mask would hide the KV cache.
+            attention_mask = torch.cat(
+                [attention_mask, attention_mask.new_ones(inputs_embeds.shape[:2])], dim=1)
             latent_history[:, :-self.patch_size, :] = latent_history[:, self.patch_size:, :].clone()
             latent_history[:, -self.patch_size:, :] = sampled_token_latent[:]
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 
+import soundfile
 import torch
 import torchaudio
 
@@ -178,7 +179,10 @@ class MingTTS:
     def _load_prompt(self, paths):
         waveforms, spk_emb = [], []
         for path in paths:
-            waveform, sample_rate = torchaudio.load(path, backend="soundfile")
+            # torchaudio>=2.9 routes load() through torchcodec (needs FFmpeg DLLs);
+            # read with soundfile directly, as backend="soundfile" intended.
+            data, sample_rate = soundfile.read(path, dtype="float32", always_2d=True)
+            waveform = torch.from_numpy(data.T.copy())
             if waveform.numel() == 0:
                 raise ValueError(f"prompt audio is empty: {path}")
             if waveform.shape[0] > 1:
@@ -357,7 +361,10 @@ class MingTTS:
         if output_path is not None:
             directory = os.path.dirname(os.path.abspath(output_path))
             os.makedirs(directory, exist_ok=True)
-            torchaudio.save(output_path, waveform, sample_rate=self.sample_rate)
+            # 32-bit float WAV, as torchaudio.save wrote it; other formats use soundfile's default.
+            subtype = "FLOAT" if output_path.lower().endswith(".wav") else None
+            soundfile.write(output_path, waveform.float().cpu().numpy().T,
+                            self.sample_rate, subtype=subtype)
         return waveform
 
 
