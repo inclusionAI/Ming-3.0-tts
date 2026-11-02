@@ -1,3 +1,5 @@
+import copy
+
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import Qwen2Model, Qwen2Config
@@ -82,6 +84,9 @@ class Encoder(nn.Module):
         self.norm = nn.LayerNorm(config.hidden_size)
         self.patch_size = patch_size
         if patch_size != -1:
+            # A copy: transformers>=5 runs only config.num_hidden_layers of a model's
+            # layers, so shrinking the shared config would cut the encoder to 4 layers.
+            config = copy.deepcopy(config)
             config.num_hidden_layers = 4
             self.aggregator = Qwen2Model(config)
             self.cls_embed = nn.Parameter(torch.rand(1, 1, config.hidden_size))
