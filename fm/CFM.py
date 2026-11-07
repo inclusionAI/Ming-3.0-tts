@@ -3,7 +3,19 @@ from torch import nn
 import torch.nn.functional as F
 
 
+_epss_cache = {}
+
+
 def get_epss_timesteps(n, device, dtype):
+    # Built once per (n, device, dtype): creating it from a Python list is a
+    # host-to-device copy, which cannot run inside a CUDA graph capture.
+    key = (n, str(device), dtype)
+    if key not in _epss_cache:
+        _epss_cache[key] = _build_epss_timesteps(n, device, dtype)
+    return _epss_cache[key]
+
+
+def _build_epss_timesteps(n, device, dtype):
     dt = 1 / 32
     predefined_timesteps = {
         5: [0, 2, 4, 8, 16, 32],
