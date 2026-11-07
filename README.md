@@ -204,6 +204,14 @@ model.synthesize(
 )
 ```
 
+To synthesize many requests in one process, pass `cuda_graphs=True`. The model then replays its per-frame work from CUDA graphs instead of launching each kernel from Python. The audio is identical, sample for sample. In our test (RTX 4070 Ti SUPER, Windows, SDPA attention), synthesis was 6 to 8 times faster: the real-time factor went from 1.7–2.2 to 0.27. The gain depends on the GPU, CPU and OS. Capturing the graphs adds about 8 seconds to model loading, so the one-shot `infer.py` command does not use it. The model handles one request at a time with graphs enabled.
+
+```python
+model = MingTTS("inclusionAI/Ming-3.0-tts-0.5b", cuda_graphs=True)
+```
+
+`python tools/check_cuda_graphs.py --model_path <model>` renders several tasks with and without graphs, compares the waveforms and prints both timings.
+
 ### Ming-3.0-tts-tiny
 
 Every task has a one-line script in [examples/one_click/](examples/one_click/); variables such as `MODEL`, `TEXT` and `OUT` can be overridden from the environment:

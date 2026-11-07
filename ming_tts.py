@@ -25,7 +25,7 @@ SPEAKER_EMBEDDING_DIM = 192
 
 class MingTTS:
     def __init__(self, model_path, device="cuda:0", text_normalization=True,
-                 cache_prompts=True):
+                 cache_prompts=True, cuda_graphs=False):
         from transformers import AutoTokenizer
 
         if os.path.isdir(model_path):
@@ -53,6 +53,10 @@ class MingTTS:
         self._normalizer = None
         self.cache_prompts = cache_prompts
         self._prompt_cache = {}
+        self.cuda_graphs = False
+        if cuda_graphs:
+            from cuda_graph_sampler import enable_cuda_graphs
+            self.cuda_graphs = enable_cuda_graphs(self.model)
 
     # -- text -----------------------------------------------------------
     @property
