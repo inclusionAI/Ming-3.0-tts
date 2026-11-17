@@ -2,7 +2,7 @@
 # flash-attn and atorch expect the CUDA image.
 # Ming-3.0-tts-0.5b only; tiny installs requirements-tiny.txt instead.
 
-torch==2.6.0
+torch==2.13.0
 torchaudio==2.6.0
 torchvision==0.21.0
 

@@ -1,6 +1,6 @@
 # Ming-3.0-tts-0.5b runtime; docker/Dockerfile uses the same set.
 # Ming-3.0-tts-tiny needs a separate stack: see requirements-tiny.txt.
-torch==2.6.0
+torch==2.13.0
 torchaudio==2.6.0
 transformers==4.46.3
 tokenizers
