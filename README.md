@@ -5,7 +5,18 @@
 
 <p align="center">Multilingual speech synthesis with free-form and paralinguistic control.</p>
 
-<p align="center">🤗 <a href="https://huggingface.co/inclusionAI/Ming-3.0-tts-0.5b">Hugging Face</a>｜ 🤖 <a href="https://modelscope.cn/models/inclusionAI/Ming-3.0-tts-0.5b">ModelScope</a> ｜ 📑 <a href="https://nomorecoding.github.io/Ming-3.0-tts/">Blog & Demos</a> ｜ 💬 <a href="https://qr.dingtalk.com/action/joingroup?code=v1,k1,O7MiZqrOrB2c7PnUZVBNvmDh/6tghNLMEtXqMteyRIpuRVJIwrSsXmL8oFqU5ajJ&_dt_no_comment=1&origin=11">DingTalk(钉钉)</a></p>
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-64748b?style=flat-square" alt="License: MIT" /></a>
+  <a href="https://huggingface.co/inclusionAI/Ming-3.0-tts-0.5b"><img src="https://img.shields.io/badge/Hugging%20Face-Models-FFD21E?style=flat-square&amp;logo=huggingface&amp;logoColor=FFD21E" alt="Hugging Face Models" /></a>
+  <a href="https://modelscope.cn/models/inclusionAI/Ming-3.0-tts-0.5b"><img src="https://img.shields.io/badge/ModelScope-Models-2563eb?style=flat-square" alt="ModelScope Models" /></a>
+  <a href="https://qr.dingtalk.com/action/joingroup?code=v1,k1,O7MiZqrOrB2c7PnUZVBNvmDh/6tghNLMEtXqMteyRIpuRVJIwrSsXmL8oFqU5ajJ&amp;_dt_no_comment=1&amp;origin=11"><img src="https://img.shields.io/badge/DingTalk-Community-2563eb?style=flat-square" alt="DingTalk Community" /></a>
+</p>
+<p align="center">
+  <a href="https://nomorecoding.github.io/Ming-3.0-tts/"><img src="https://img.shields.io/badge/Audio-Demos-0284c7?style=flat-square" alt="Audio Demos" /></a>
+  <a href="#vllm-omni-tiny"><img src="https://img.shields.io/badge/vLLM--Omni-Tiny-2563eb?style=flat-square" alt="vLLM-Omni: Tiny Supported" /></a>
+  <a href="sft/README.md"><img src="https://img.shields.io/badge/Fine--tuning-0.5B%20%C2%B7%20Full%20%2F%20LoRA-0284c7?style=flat-square" alt="Fine-tuning: 0.5B Full / LoRA" /></a>
+  <a href="https://paperswithcode.co/api/v1/papers/132182/leaderboard-badge-link?eval=47742"><img src="https://paperswithcode.co/api/v1/papers/132182/leaderboard-badge.svg?eval=47742&amp;live=1" alt="Papers with Code: Artificial Analysis Provider Voice leaderboard" /></a>
+</p>
 
 Ming-3.0-tts provides two speech-generation models: **0.5b**, a dense model, and **tiny**, a MoE model built on Ling V3 (7.9B total · 1.3B active).
 
@@ -67,6 +78,7 @@ Text and task-specific control tokens condition a language model with a DiT patc
 - [Demo Video](#demo-video)
 - [Models](#models)
 - [Quick Start](#quick-start-)
+- [vLLM-Omni (Tiny)](#vllm-omni-tiny)
 - [Cookbook](#cookbook)
 - [Fine-tuning (0.5B)](sft/README.md)
 - [Built-in voices](#built-in-voices)
@@ -146,6 +158,12 @@ Tiny uses a separate reference inference environment: Python **3.10.15**, PyTorc
 conda create -n ming-tiny python=3.10.15 -y && conda activate ming-tiny
 pip install -r requirements-tiny.txt
 ```
+
+### vLLM-Omni (Tiny)
+
+For accelerated serving of **Ming-3.0-tts-tiny**, we recommend our [dedicated vLLM-Omni branch (`model/lingv3-tts-fixes`)](https://github.com/inclusionAI/vllm-omni/commits/model/lingv3-tts-fixes) to reduce the risk of unrelated upstream changes affecting inference. For reproducible deployments, pin a specific commit from this branch.
+
+The upstream community integration is available in [vllm-project/vllm-omni PR #9198](https://github.com/vllm-project/vllm-omni/pull/9198). If you use the latest upstream version, validate it with your workload before upgrading. Follow the selected vLLM-Omni version's installation instructions in a separate environment from the reference inference setup above.
 
 ### Model Download
 
