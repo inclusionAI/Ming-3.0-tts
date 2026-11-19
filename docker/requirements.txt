@@ -14,7 +14,7 @@ numpy
 soundfile==0.12.1
 tqdm
 loguru
-diffusers==0.33.0
+diffusers==0.38.0
 x_transformers
 onnxruntime
 inflect

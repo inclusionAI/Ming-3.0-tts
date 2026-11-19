@@ -13,7 +13,7 @@ loguru
 
 # Flow-matching head and audio tokenizer
 x_transformers==2.9.2
-diffusers==0.33.0
+diffusers==0.38.0
 
 # Speaker embedding (campplus.onnx)
 onnxruntime
