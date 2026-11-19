@@ -71,7 +71,9 @@ class AudioVAE(PreTrainedModel):
         if self.config.patch_size != -1:
             frame_num = torch.ceil(frame_num/self.config.patch_size)
         h, y = self.encoder(waveform)
-        h = h.transpose(1, 2)  # [B, d, T]
+        # .contiguous(): on Apple MPS, F.softplus ignores the strides of a transposed
+        # input and returns wrong values, which corrupts the posterior sample.
+        h = h.transpose(1, 2).contiguous()  # [B, d, T]
 
         posterior = OobleckDiagonalGaussianDistribution(h)
         latent = posterior.sample()  # [B, d/2, T]

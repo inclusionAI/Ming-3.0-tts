@@ -282,7 +282,7 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
         projected_spk_emb = []
         if spk_emb is not None:
             for se in spk_emb:
-                se = self.spk_head(se.to(self.device))
+                se = self.spk_head(se.to(self.device, self.spk_head.weight.dtype))
                 if use_zero_spk_emb:
                     se = torch.zeros_like(se)
                 projected_spk_emb.append(se)
@@ -292,7 +292,8 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
         if prompt_latent is not None and prompt_text is not None:
             bsz = prompt_latent.size(0)
             projected_latent = prompt_latent.reshape(-1, self.patch_size, self.latent_dim)
-            projected_latent = self.linear_proj_audio(projected_latent)
+            projected_latent = self.linear_proj_audio(
+                projected_latent.to(next(self.linear_proj_audio.parameters()).dtype))
             projected_latent = projected_latent.reshape(bsz, -1, projected_latent.size(-1))
 
         input_part, spk_positions, latent_position = prompt_contract.build_input_ids(
