@@ -6,7 +6,7 @@
 
 torch==2.7.1+cu118
 torchaudio==2.7.1+cu118
-transformers==4.46.3
+transformers==5.10.1
 tokenizers==0.20.3
 safetensors==0.8.0
 accelerate==1.14.0

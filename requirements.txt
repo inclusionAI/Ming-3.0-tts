@@ -2,7 +2,7 @@
 # Ming-3.0-tts-tiny needs a separate stack: see requirements-tiny.txt.
 torch==2.6.0
 torchaudio==2.6.0
-transformers==4.46.3
+transformers==5.10.1
 tokenizers
 accelerate==1.3.0
 huggingface_hub
